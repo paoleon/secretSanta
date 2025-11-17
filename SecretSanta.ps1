@@ -1,9 +1,9 @@
 # SecretSanta.ps1
-# Genera abbinamenti Secret Santa con:
+# Versione Telegram Bot
 # - divieto di auto-assegnamento
 # - coppie vietate (anche bidirezionali)
-# - storico JSON delle ultime 3 soluzioni, evitando di ripeterle
-# - invio email a ciascun partecipante con il proprio receiver e un numero di controllo comune
+# - storico JSON delle ultime 3 soluzioni
+# - invio messaggi Telegram a ogni partecipante
 
 # ================== FUNZIONI ==================
 
@@ -14,6 +14,7 @@ function Count-Assignments {
         [string[][]] $ForbiddenPairs
     )
 
+    # Se non ci sono più giver da assegnare, questa è una soluzione valida
     if ($Givers.Count -eq 0) {
         return 1
     }
@@ -22,8 +23,10 @@ function Count-Assignments {
     $total = 0
 
     foreach ($receiver in $Receivers) {
+        # 1) Nessuno può pescare se stesso
         if ($giver -eq $receiver) { continue }
 
+        # 2) Coppie vietate
         $isForbidden = $false
         foreach ($pair in $ForbiddenPairs) {
             if ($pair[0] -eq $giver -and $pair[1] -eq $receiver) {
@@ -62,8 +65,10 @@ function Find-Assignments {
     $giver = $Givers[0]
 
     foreach ($receiver in $Receivers) {
+        # 1) Nessuno può pescare se stesso
         if ($giver -eq $receiver) { continue }
 
+        # 2) Coppie vietate
         $isForbidden = $false
         foreach ($pair in $ForbiddenPairs) {
             if ($pair[0] -eq $giver -and $pair[1] -eq $receiver) {
@@ -96,6 +101,7 @@ function Get-AssignmentKey {
         [hashtable] $Assignments
     )
 
+    # Chiave canonica per confrontare due soluzioni (ordinata per nome)
     $pairs = $Assignments.GetEnumerator() |
         Sort-Object Name |
         ForEach-Object { "$($_.Name):$($_.Value)" }
@@ -119,6 +125,7 @@ function Load-History {
 
     $history = $json | ConvertFrom-Json
 
+    # Se c'è un solo oggetto, ConvertFrom-Json non restituisce un array
     if ($history -and $history.GetType().Name -ne 'Object[]') {
         $history = @($history)
     }
@@ -135,6 +142,22 @@ function Save-History {
     $History | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 $Path
 }
 
+function Send-TelegramMessage {
+    param(
+        [string] $Token,
+        [string] $ChatId,
+        [string] $Text
+    )
+
+    $uri = "https://api.telegram.org/bot$Token/sendMessage"
+    $body = @{
+        chat_id = $ChatId
+        text    = $Text
+    }
+
+    Invoke-RestMethod -Uri $uri -Method Post -Body $body | Out-Null
+}
+
 # ================== CONFIGURAZIONE ==================
 
 # Partecipanti
@@ -148,18 +171,6 @@ $names = @(
     "Chiara"
 )
 
-# EMAIL PARTECIPANTI (nome → email)
-# Sostituisci con indirizzi reali
-$emails = @{
-    "Alessandro" = "alessandro@example.com"
-    "Silvia"     = "silvia@example.com"
-    "Simone"     = "simone@example.com"
-    "Ilaria"     = "ilaria@example.com"
-    "Cipo"       = "cipo@example.com"
-    "Gio"        = "gio@example.com"
-    "Chiara"     = "chiara@example.com"
-}
-
 # Coppie vietate (giver, receiver) in entrambe le direzioni
 $forbiddenPairs = @(
     @("Alessandro", "Silvia"),
@@ -172,22 +183,20 @@ $forbiddenPairs = @(
     @("Gio",        "Cipo")
 )
 
+$telegramIdsJson = $env:TELEGRAM_CHAT_IDS
+$telegramIds = $telegramIdsJson | ConvertFrom-Json
+
+# Token del bot da variabile d'ambiente (es. GitHub Actions: TELEGRAM_BOT_TOKEN secret)
+$TelegramBotToken = $env:TELEGRAM_BOT_TOKEN
+if (-not $TelegramBotToken) {
+    Write-Host "Token Telegram non trovato (variabile TELEGRAM_BOT_TOKEN)." -ForegroundColor Red
+    exit 1
+}
+
 # File di storico JSON (nella stessa cartella dello script)
 $historyPath = Join-Path $PSScriptRoot "secret_santa_history.json"
 
-# CONFIGURAZIONE SMTP (DA ADATTARE)
-# Esempio generico: server SMTP del tuo provider
-$smtpServer     = "localhost"
-$smtpPort       = 2525
-$fromEmail      = "secret.santa@test.local"
-#$useSsl         = $false
-# Richiede le credenziali (user/password SMTP) all'avvio
-# Puoi anche commentare e impostare $smtpCredential in altro modo se vuoi
-#$smtpCredential = $null   # niente credenziali per smtp4dev
-#$smtpCredential = Get-Credential -Message "Credenziali per il server SMTP"
-
-
-# ================== RIEPILOGO REGOLE ==================
+# ================== CARICAMENTO STORICO ==================
 
 $history = Load-History -Path $historyPath
 $historyKeys = @()
@@ -197,7 +206,9 @@ foreach ($item in $history) {
     }
 }
 
-Write-Host "=== Regole Secret Santa ===`n"
+# ================== RIEPILOGO REGOLE ==================
+
+Write-Host "=== Regole Secret Santa (Telegram) ===`n"
 
 Write-Host "Partecipanti:"
 $names | ForEach-Object { Write-Host " - $_" }
@@ -213,7 +224,8 @@ if ($forbiddenPairs.Count -eq 0) {
 
 Write-Host "`nStorico soluzioni da evitare: $($history.Count) (max 3)`n"
 
-# Numero di soluzioni possibili
+# ================== NUMERO TOTALE SOLUZIONI ==================
+
 $totalSolutions = Count-Assignments -Givers $names -Receivers $names -ForbiddenPairs $forbiddenPairs
 Write-Host "Numero totale di soluzioni possibili con questi vincoli: $totalSolutions`n"
 
@@ -241,6 +253,7 @@ while (-not $validAssignments -and $attempt -lt $maxTries) {
         continue
     }
 
+    # Soluzione nuova
     $validAssignments = $assignments
 }
 
@@ -252,31 +265,27 @@ if (-not $validAssignments) {
 # Numero di controllo comune a tutti (per questa estrazione)
 $controlNumber = Get-Random -Minimum 100000 -Maximum 999999
 
-Write-Host "Sto calcolando gli abbinamenti di questo Secret Santa...`n"
+Write-Host "Abbinamenti Secret Santa:`n"
 Write-Host "Numero di controllo per questa estrazione: $controlNumber`n"
 
-# foreach ($k in ($validAssignments.Keys | Sort-Object)) {
-#     Write-Host "$k ::> $($validAssignments[$k])"
-# }
+foreach ($k in ($validAssignments.Keys | Sort-Object)) {
+    Write-Host "$k ::> $($validAssignments[$k])"
+}
 
-# ================== INVIO EMAIL ==================
+# ================== INVIO MESSAGGI TELEGRAM ==================
 
-Write-Host "Invio email ai Giver del Secret Santa:`n"
+Write-Host "`nInvio messaggi Telegram...`n"
 
 foreach ($giver in $validAssignments.Keys) {
-    # chi FA il regalo = giver
-    # chi LO RICEVE    = $validAssignments[$giver]
-
-    if (-not $emails.ContainsKey($giver)) {
-        Write-Host "ATTENZIONE: nessuna email definita per '$giver', salto l'invio." -ForegroundColor Yellow
+    if (-not $telegramIds.ContainsKey($giver)) {
+        Write-Host "ATTENZIONE: nessun chat_id Telegram definito per '$giver', salto l'invio." -ForegroundColor Yellow
         continue
     }
 
-    $to       = $emails[$giver]              # mail di chi fa il regalo
-    $receiver = $validAssignments[$giver]    # persona a cui deve fare il regalo
+    $chatId   = $telegramIds[$giver]       # chi fa il regalo
+    $receiver = $validAssignments[$giver]  # destinatario
 
-    $subject = "Secret Santa - Il tuo abbinamento (controllo $controlNumber)"
-    $body    = @"
+    $text = @"
 Ciao $giver,
 
 quest'anno sei il Secret Santa di:
@@ -285,28 +294,19 @@ quest'anno sei il Secret Santa di:
 
 Numero di controllo estrazione: $controlNumber
 
-Conservalo: è lo stesso per tutti i partecipanti e può servire per eventuali verifiche.
+Conservalo: e' lo stesso per tutti i partecipanti e puo' servire per eventuali verifiche.
 
 Buon Secret Santa!
 "@
 
     try {
-        # smtp4dev: niente SSL, niente credenziali
-        Send-MailMessage `
-            -SmtpServer $smtpServer `
-            -Port       $smtpPort `
-            -From       $fromEmail `
-            -To         $to `
-            -Subject    $subject `
-            -Body       $body
-
-        Write-Host "Email inviata a $giver <$to>."
+        Send-TelegramMessage -Token $TelegramBotToken -ChatId $chatId -Text $text
+        Write-Host "Messaggio Telegram inviato a $giver (chat_id = $chatId)."
     }
     catch {
-        Write-Host "Errore nell'invio email a $giver <$to>: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Errore nell'invio Telegram a $giver (chat_id = $chatId): $($_.Exception.Message)" -ForegroundColor Red
     }
 }
-
 
 # ================== AGGIORNAMENTO STORICO ==================
 
@@ -326,5 +326,3 @@ if ($history.Count -gt 3) {
 Save-History -Path $historyPath -History $history
 
 Write-Host "`nStorico aggiornato (max 3 soluzioni). File: $historyPath"
-
-Write-Host "http://localhost:3000"
