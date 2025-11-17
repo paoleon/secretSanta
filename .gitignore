@@ -1,0 +1,74 @@
+# ============================
+# Secret Santa – PowerShell
+# ============================
+
+# File storico che non deve essere pubblico
+secret_santa_history.json
+
+# File di log
+*.log
+logs/
+log/
+
+# Output temporanei
+*.tmp
+*.temp
+*.bak
+*.old
+
+# File generati da Powershell
+*.psd1
+*.psm1
+*.ps1xml
+
+# Directory temporanee di Powershell / NuGet
+powershell/
+.nupkg/
+
+# ============================
+# Editor & IDE
+# ============================
+
+# VSCode
+.vscode/
+.history/
+*.code-workspace
+
+# JetBrains Rider / PhpStorm / etc
+.idea/
+
+# Editor vari
+*~ 
+*.swp
+*.swo
+
+# ============================
+# Sistema Operativo
+# ============================
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.plist
+
+# Linux
+.cache/
+*.pid
+
+# ============================
+# Node / Python (se un giorno li aggiungi)
+# ============================
+
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc

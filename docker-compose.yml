@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  smtp4dev:
+    image: rnwood/smtp4dev
+    container_name: smtp4dev
+    restart: unless-stopped
+    ports:
+      - "3000:80"     # interfaccia web
+      - "2525:25"     # server SMTP
