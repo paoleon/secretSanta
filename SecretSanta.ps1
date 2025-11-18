@@ -191,19 +191,16 @@ if (-not $telegramIdsJson) {
     exit 1
 }
 
-# JSON → PSCustomObject
-$telegramIdsObj = $telegramIdsJson | ConvertFrom-Json
-
-# PSCustomObject → hashtable nome → chat_id
-$telegramIds = @{}
-$telegramIdsObj.PSObject.Properties | ForEach-Object {
-    $telegramIds[$_.Name] = "$($_.Value)"
-}
+# JSON → PSCustomObject (nome → chat_id)
+$telegramIds = $telegramIdsJson | ConvertFrom-Json
 
 Write-Host "Chat IDs caricati:"
-$telegramIds.GetEnumerator() | Sort-Object Name | ForEach-Object {
-    Write-Host " - $($_.Name) : $($_.Value)"
-}
+$telegramIds.PSObject.Properties |
+    Sort-Object Name |
+    ForEach-Object {
+        Write-Host " - $($_.Name) : $($_.Value)"
+    }
+
 
 
 # Token del bot da variabile d'ambiente (es. GitHub Actions: TELEGRAM_BOT_TOKEN secret)
@@ -297,12 +294,15 @@ foreach ($k in ($validAssignments.Keys | Sort-Object)) {
 Write-Host "`nInvio messaggi Telegram...`n"
 
 foreach ($giver in $validAssignments.Keys) {
-    if (-not $telegramIds.ContainsKey($giver)) {
+    # Verifica che il JSON contenga una proprietà con il nome del giver
+    $definedNames = $telegramIds.PSObject.Properties.Name
+    if ($definedNames -notcontains $giver) {
         Write-Host "ATTENZIONE: nessun chat_id Telegram definito per '$giver', salto l'invio." -ForegroundColor Yellow
         continue
     }
 
-    $chatId   = $telegramIds[$giver]       # chi fa il regalo
+    # Lettura del chat_id dal PSCustomObject
+    $chatId   = $telegramIds.$giver        # chi fa il regalo
     $receiver = $validAssignments[$giver]  # destinatario
 
     $text = @"
@@ -327,6 +327,7 @@ Buon Secret Santa!
         Write-Host "Errore nell'invio Telegram a $giver (chat_id = $chatId): $($_.Exception.Message)" -ForegroundColor Red
     }
 }
+
 
 # ================== AGGIORNAMENTO STORICO ==================
 
