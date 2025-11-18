@@ -1,91 +1,53 @@
 # ===============================
-# Run-All.ps1
-# Avvia Docker Desktop (se serve)
-# Avvia smtp4dev con docker compose
-# Attende che il container sia "Up"
-# Esegue SecretSanta.ps1
+# Start-Bot.ps1
+# Avvia la versione Telegram del Secret Santa
+# - Controlla la presenza del token Telegram
+# - Chiede il token se assente (solo locale)
+# - Imposta la variabile d'ambiente
+# - Avvia SecretSanta.ps1
 # ===============================
 
-Write-Host "=== Controllo Docker Desktop ==="
-
-# Verifica se docker è disponibile
-try {
-    docker version > $null 2>&1
-}
-catch {
-    Write-Host "Docker Desktop non è attivo. Avvialo e riprova." -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "Docker è attivo.`n"
+Write-Host "=== Secret Santa – Avvio versione Telegram Bot ===`n"
 
 # ===============================
-# PUNTO 1 — docker compose up
+# PUNTO 1 — Verifica Token Telegram
 # ===============================
 
-Write-Host "=== Avvio smtp4dev con docker compose ==="
+if (-not $env:TELEGRAM_BOT_TOKEN -or [string]::IsNullOrWhiteSpace($env:TELEGRAM_BOT_TOKEN)) {
 
-# directory dove hai docker-compose.yml
-$composeDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    Write-Host "Il token TELEGRAM_BOT_TOKEN non è impostato." -ForegroundColor Yellow
+    Write-Host "Inserisci il token del Bot (non verrà salvato in file, solo nella sessione PS):`n"
 
-Write-Host "Directory compose: $composeDir"
+    $token = Read-Host "Telegram Bot Token"
 
-Push-Location $composeDir
-
-docker compose up -d
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Errore nell'eseguire 'docker compose up -d'." -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
-
-Write-Host "docker compose avviato.`n"
-
-
-# ===============================
-# PUNTO 2 — Attendi che smtp4dev sia su
-# ===============================
-
-Write-Host "=== Attesa avvio container smtp4dev ==="
-
-$maxWait = 20
-$waited  = 0
-
-while ($waited -lt $maxWait) {
-    $container = docker ps --format "{{.Names}} {{.Status}}" | Select-String "smtp4dev"
-
-    if ($container) {
-        Write-Host "smtp4dev è attivo: $container"
-        break
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        Write-Host "Nessun token inserito. Interrotto." -ForegroundColor Red
+        exit 1
     }
 
-    Write-Host "In attesa che il container parta..."
-    Start-Sleep -Seconds 1
-    $waited++
+    $env:TELEGRAM_BOT_TOKEN = $token
+    Write-Host "`nToken configurato correttamente.`n"
+}
+else {
+    Write-Host "Token Telegram già presente nella sessione.`n"
 }
 
-if (-not $container) {
-    Write-Host "smtp4dev NON è partito entro il tempo limite." -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
-
-Pop-Location
-Write-Host "`n"
-
-
 # ===============================
-# PUNTO 3 — Avvio script principale
+# PUNTO 2 — Avvio script principale
 # ===============================
 
-Write-Host "=== Avvio SecretSanta.ps1 ==="
+Write-Host "=== Avvio SecretSanta.ps1 ===`n"
 
 $scriptPath = Join-Path (Split-Path $MyInvocation.MyCommand.Path) "SecretSanta.ps1"
 
 if (-not (Test-Path $scriptPath)) {
-    Write-Host "SecretSanta.ps1 non trovato: $scriptPath" -ForegroundColor Red
+    Write-Host "ERRORE: SecretSanta.ps1 non trovato nel percorso previsto:" -ForegroundColor Red
+    Write-Host "       $scriptPath"
     exit 1
 }
 
 powershell -ExecutionPolicy Bypass -File $scriptPath
+
+Write-Host "`n=== Completato ==="
+
+
