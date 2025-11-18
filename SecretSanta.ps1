@@ -183,8 +183,28 @@ $forbiddenPairs = @(
     @("Gio",        "Cipo")
 )
 
+# ================== LETTURA TELEGRAM_CHAT_IDS ==================
+
 $telegramIdsJson = $env:TELEGRAM_CHAT_IDS
-$telegramIds = $telegramIdsJson | ConvertFrom-Json
+if (-not $telegramIdsJson) {
+    Write-Host "TELEGRAM_CHAT_IDS non presente o vuoto." -ForegroundColor Red
+    exit 1
+}
+
+# JSON → PSCustomObject
+$telegramIdsObj = $telegramIdsJson | ConvertFrom-Json
+
+# PSCustomObject → hashtable nome → chat_id
+$telegramIds = @{}
+$telegramIdsObj.PSObject.Properties | ForEach-Object {
+    $telegramIds[$_.Name] = "$($_.Value)"
+}
+
+Write-Host "Chat IDs caricati:"
+$telegramIds.GetEnumerator() | Sort-Object Name | ForEach-Object {
+    Write-Host " - $($_.Name) : $($_.Value)"
+}
+
 
 # Token del bot da variabile d'ambiente (es. GitHub Actions: TELEGRAM_BOT_TOKEN secret)
 $TelegramBotToken = $env:TELEGRAM_BOT_TOKEN
