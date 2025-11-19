@@ -31,8 +31,8 @@ export default {
       return new Response("No text message", { status: 200 });
     }
 
-    const from = message.from;
-    const text = message.text.trim();
+    const from   = message.from;
+    const text   = message.text.trim();
     const chatId = message.chat.id;
 
     // Evita loop: ignora i messaggi inviati dal bot stesso
@@ -40,10 +40,35 @@ export default {
       return new Response("Ignore bot messages", { status: 200 });
     }
 
+    const botToken    = env.TELEGRAM_BOT_TOKEN;
+    const adminChatId = env.ADMIN_CHAT_ID;
+
+    // Piccola helper per sendMessage
+    async function sendMessage(chatId, text) {
+      if (!botToken) {
+        console.log("TELEGRAM_BOT_TOKEN non configurato nel Worker");
+        return;
+      }
+      const tgUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      const body = {
+        chat_id: chatId,
+        text: text
+      };
+      const res = await fetch(tgUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        console.log("Errore sendMessage:", res.status, errText);
+      }
+    }
+
     // ===============================
-    // 1) INOLTRO AL TUO ADMIN_CHAT_ID
+    // 1) Inoltra SEMPRE all'admin
     // ===============================
-    if (env.TELEGRAM_BOT_TOKEN && env.ADMIN_CHAT_ID) {
+    if (adminChatId) {
       const senderName =
         (from && (from.username || from.first_name || from.last_name)) ||
         "unknown";
@@ -55,36 +80,36 @@ export default {
         `Testo:\n${text}`;
 
       try {
-        const tgUrl = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-        const body = {
-          chat_id: env.ADMIN_CHAT_ID,
-          text: adminText
-        };
-
-        const res = await fetch(tgUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
-
-        if (!res.ok) {
-          const errText = await res.text();
-          console.log("Errore inoltro admin:", res.status, errText);
-        }
+        await sendMessage(adminChatId, adminText);
       } catch (e) {
         console.log("Exception inoltro admin:", e);
       }
     }
 
     // ===============================
-    // 2) TRIGGER GITHUB ACTIONS (/run, /start)
+    // 2) /start → risposta al chiamante
     // ===============================
-    if (
-      text === "/run" ||
-      text === `/run@${env.BOT_USERNAME}` ||
-      text === "/start" ||
-      text === `/start@${env.BOT_USERNAME}`
-    ) {
+    if (text === "/start") {
+      const helpText =
+        "Ciao! Sono il bot del Secret Santa.\n\n" +
+        "• Scrivi /hat per avviare l'estrazione dei regali.\n" +
+        "• Quando l'estrazione parte, riceverai un messaggio con il nome della persona a cui devi fare il regalo.\n\n" +
+        "Questo bot è gestito dall'organizzatore del Secret Santa.";
+
+      try {
+        await sendMessage(chatId, helpText);
+      } catch (e) {
+        console.log("Exception risposta /start:", e);
+      }
+
+      // Non serve fare altro per /start
+      return new Response("OK", { status: 200 });
+    }
+
+    // ===============================
+    // 3) /hat → trigger GitHub Actions
+    // ===============================
+    if (text === "/hat") {
       const repo   = env.GITHUB_REPO;      // es: "tuoutente/secretSanta"
       const wfFile = env.GITHUB_WORKFLOW;  // es: "secret-santa.yml"
       const ref    = env.GITHUB_REF || "main";
@@ -106,16 +131,22 @@ export default {
         if (!ghRes.ok) {
           const errText = await ghRes.text();
           console.log("GitHub error:", ghRes.status, errText);
-          // Non blocchiamo Telegram, rispondiamo comunque 200
+          // feedback al chiamante
+          await sendMessage(chatId, "Si è verificato un errore nell'avviare l'estrazione. Contatta l'organizzatore.");
         } else {
           console.log("GitHub workflow dispatched for ref:", ref);
+          // feedback al chiamante
+          await sendMessage(chatId, "Ho avviato l'estrazione del Secret Santa. Tra poco riceverete i vostri abbinamenti!");
         }
       } catch (e) {
         console.log("Exception GitHub dispatch:", e);
+        await sendMessage(chatId, "Errore interno nell'avviare l'estrazione.");
       }
+
+      return new Response("OK", { status: 200 });
     }
 
-    // Telegram vuole sempre 200 OK
+    // Altri messaggi (non /start, non /hat) → solo inoltro admin
     return new Response("OK", { status: 200 });
   }
 }
