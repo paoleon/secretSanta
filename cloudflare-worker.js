@@ -92,7 +92,7 @@ export default {
     if (text === "/start") {
       const helpText =
         "Ciao! Sono il bot del Secret Santa.\n\n" +
-        "• Scrivi /hat per avviare l'estrazione dei regali.\n" +
+        "• Scrivi /hat per avviare l'estrazione delle coppie.\n" +
         "• Quando l'estrazione parte, riceverai un messaggio con il nome della persona a cui devi fare il regalo.\n\n" +
         "Questo bot è gestito dall'organizzatore del Secret Santa.";
 
