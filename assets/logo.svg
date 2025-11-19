@@ -1,0 +1,24 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366f1"></stop>
+      <stop offset="100%" stop-color="#ec4899"></stop>
+    </linearGradient>
+  </defs>
+
+  <rect width="200" height="200" rx="30" fill="#0f172a"></rect>
+
+  <!-- Scatola -->
+  <rect x="45" y="70" width="110" height="90" rx="12" fill="url(#g1)" opacity="0.9"></rect>
+
+  <!-- Nastro verticale -->
+  <rect x="92" y="70" width="16" height="90" fill="white" opacity="0.8"></rect>
+
+  <!-- Nastro orizzontale -->
+  <rect x="45" y="105" width="110" height="16" fill="white" opacity="0.8"></rect>
+
+  <!-- Fiocco -->
+  <circle cx="100" cy="70" r="18" fill="#fff"></circle>
+  <path d="M100 70L72 40" stroke="#fff" stroke-width="10" stroke-linecap="round"></path>
+  <path d="M100 70L128 40" stroke="#fff" stroke-width="10" stroke-linecap="round"></path>
+</svg>
