@@ -1,117 +1,149 @@
 export default {
-  async fetch(request, env, ctx) {
-    // Per debug: risponde 200 anche a GET
+  async fetch(request, env) {
     if (request.method !== "POST") {
-      return new Response("OK (Telegram webhook endpoint)", { status: 200 });
+      return new Response("OK", { status: 200 });
     }
 
     const url = new URL(request.url);
-    const parts = url.pathname.split("/").filter(Boolean); // es: ["webhook", "mio-segreto"]
-    const pathSecret = parts.length >= 2 ? parts[1] : null;
+    const parts = url.pathname.split("/").filter(Boolean);
+    const pathSecret = parts[1];
 
-    // Controllo "segreto" URL /webhook/<TELEGRAM_SECRET>
     if (env.TELEGRAM_SECRET && pathSecret !== env.TELEGRAM_SECRET) {
       return new Response("Forbidden", { status: 403 });
     }
 
-    // --- Legge l'update di Telegram ---
     let update;
     try {
       update = await request.json();
     } catch (e) {
-      console.log("JSON parse error:", e);
-      return new Response("Bad Request", { status: 400 });
+      console.log("Invalid JSON");
+      return new Response("Bad JSON", { status: 400 });
     }
 
-    console.log("Telegram update:", JSON.stringify(update));
+    const msg = update.message;
+    if (!msg || !msg.text) return new Response("No text", { status: 200 });
 
-    const message = update.message || update.edited_message;
-    if (!message || !message.text) {
-      // Non interessa (sticker, foto, ecc.)
-      return new Response("No text message", { status: 200 });
-    }
+    const text = msg.text.trim();
+    const chatId = msg.chat.id;
+    const from = msg.from;
 
-    const from   = message.from;
-    const text   = message.text.trim();
-    const chatId = message.chat.id;
+    if (from?.is_bot) return new Response("Ignore bot", { status: 200 });
 
-    // Evita loop: ignora i messaggi inviati dal bot stesso
-    if (from && from.is_bot) {
-      return new Response("Ignore bot messages", { status: 200 });
-    }
+    const botToken = env.TELEGRAM_BOT_TOKEN;
+    const adminId = parseInt(env.ADMIN_CHAT_ID);
 
-    const botToken    = env.TELEGRAM_BOT_TOKEN;
-    const adminChatId = env.ADMIN_CHAT_ID;
-
-    // Piccola helper per sendMessage
-    async function sendMessage(chatId, text) {
-      if (!botToken) {
-        console.log("TELEGRAM_BOT_TOKEN non configurato nel Worker");
-        return;
-      }
-      const tgUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
-      const body = {
-        chat_id: chatId,
-        text: text
-      };
-      const res = await fetch(tgUrl, {
+    // Helper: send message
+    async function send(chat, text) {
+      const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+      await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify({ chat_id: chat, text })
       });
-      if (!res.ok) {
-        const errText = await res.text();
-        console.log("Errore sendMessage:", res.status, errText);
-      }
     }
 
-    // ===============================
-    // 1) Inoltra SEMPRE all'admin
-    // ===============================
-    if (adminChatId) {
+    // ======== Inoltro messaggi all'admin ========
+    try {
       const senderName =
-        (from && (from.username || from.first_name || from.last_name)) ||
-        "unknown";
+        from.username || from.first_name || from.last_name || "sconosciuto";
 
-      const adminText =
-        `Nuovo messaggio al bot:\n` +
-        `Da: ${senderName}\n` +
-        `Chat ID: ${chatId}\n\n` +
-        `Testo:\n${text}`;
-
-      try {
-        await sendMessage(adminChatId, adminText);
-      } catch (e) {
-        console.log("Exception inoltro admin:", e);
-      }
+      await send(
+        adminId,
+        `📩 *Nuovo messaggio al bot*\n` +
+        `👤 Da: ${senderName}\n` +
+        `🆔 Chat ID: ${chatId}\n\n` +
+        `💬 Messaggio:\n${text}`
+      );
+    } catch (e) {
+      console.log("Errore inoltro admin", e);
     }
 
-    // ===============================
-    // 2) /start → risposta al chiamante
-    // ===============================
+
+    // ====================================================================================
+    // 1) /start → chiunque può usarlo
+    // ====================================================================================
+
     if (text === "/start") {
-      const helpText =
-        "Ciao! Sono il bot del Secret Santa.\n\n" +
-        "• Scrivi /hat per avviare l'estrazione delle coppie.\n" +
-        "• Quando l'estrazione parte, riceverai un messaggio con il nome della persona a cui devi fare il regalo.\n\n" +
-        "Questo bot è gestito dall'organizzatore del Secret Santa.";
+      await send(chatId,
+        "🎅 *Benvenuto nel Secret Santa Bot!*\n\n" +
+        "Questo bot gestisce l'estrazione automatica del Secret Santa.\n" +
+        "I comandi sono disponibili solo per l'organizzatore.\n\n" +
+        "Se vuoi parlare con lui, scrivi un messaggio: verrà inoltrato."
+      );
 
-      try {
-        await sendMessage(chatId, helpText);
-      } catch (e) {
-        console.log("Exception risposta /start:", e);
-      }
-
-      // Non serve fare altro per /start
       return new Response("OK", { status: 200 });
     }
 
-    // ===============================
-    // 3) /hat → trigger GitHub Actions
-    // ===============================
+    // ====================================================================================
+    // FUNZIONI SOLO PER ADMIN
+    // ====================================================================================
+
+    const isAdmin = chatId === adminId;
+
+    if (!isAdmin) {
+      // Utente normale → NON può usare hat, broadcast, list, status
+      return new Response("OK", { status: 200 });
+    }
+
+    // ----- /list -----
+    if (text === "/list") {
+      const participants = JSON.parse(env.PARTICIPANTS_JSON); 
+      const lista = Object.keys(participants).map(n => `• ${n}`).join("\n");
+
+      await send(chatId, `👥 *Lista partecipanti*\n\n${lista}`);
+      return new Response("OK");
+    }
+
+    // ----- /status -----
+    if (text === "/status") {
+      const apiUrl = `https://raw.githubusercontent.com/${env.GITHUB_REPO}/main/secret_santa_history.json`;
+
+      try {
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error("no history");
+
+        const history = await res.json();
+
+        if (!history.length) {
+          await send(chatId, "📭 Nessuna estrazione presente nello storico.");
+          return new Response("OK");
+        }
+
+        const last = history[0];
+
+        await send(
+          chatId,
+          `📅 *Ultima estrazione*\n` +
+          `🕒 Data: ${last.date}\n` +
+          `🔐 Numero di controllo: ${last.controlNumber}\n`
+        );
+
+      } catch (e) {
+        await send(chatId, "⚠️ Impossibile leggere lo storico.");
+      }
+
+      return new Response("OK");
+    }
+
+    // ----- /broadcast -----
+    if (text.startsWith("/broadcast ")) {
+      const msgToAll = text.replace("/broadcast ", "");
+
+      const participants = JSON.parse(env.PARTICIPANTS_JSON);
+
+      for (const name of Object.keys(participants)) {
+        const pid = parseInt(participants[name]);
+        await send(pid, `📢 *Messaggio dall'organizzatore*:\n\n${msgToAll}`);
+      }
+
+      await send(chatId, "📨 Broadcast inviato a tutti.");
+      return new Response("OK");
+    }
+
+    // ----- /hat -----
     if (text === "/hat") {
-      const repo   = env.GITHUB_REPO;      // es: "tuoutente/secretSanta"
-      const wfFile = env.GITHUB_WORKFLOW;  // es: "secret-santa.yml"
+      const repo   = env.GITHUB_REPO;
+      const wfFile = env.GITHUB_WORKFLOW;
       const ref    = env.GITHUB_REF || "main";
 
       const ghUrl = `https://api.github.com/repos/${repo}/actions/workflows/${wfFile}/dispatches`;
@@ -128,25 +160,18 @@ export default {
           body: JSON.stringify({ ref })
         });
 
-        if (!ghRes.ok) {
-          const errText = await ghRes.text();
-          console.log("GitHub error:", ghRes.status, errText);
-          // feedback al chiamante
-          await sendMessage(chatId, "Si è verificato un errore nell'avviare l'estrazione. Contatta l'organizzatore.");
+        if (ghRes.ok) {
+          await send(chatId, "🎩 Estrazione Secret Santa avviata!");
         } else {
-          console.log("GitHub workflow dispatched for ref:", ref);
-          // feedback al chiamante
-          await sendMessage(chatId, "Ho avviato l'estrazione del Secret Santa. Tra poco riceverete i vostri abbinamenti!");
+          await send(chatId, "❌ Errore avvio estrazione.");
         }
       } catch (e) {
-        console.log("Exception GitHub dispatch:", e);
-        await sendMessage(chatId, "Errore interno nell'avviare l'estrazione.");
+        await send(chatId, "⚠️ Errore interno.");
       }
 
-      return new Response("OK", { status: 200 });
+      return new Response("OK");
     }
 
-    // Altri messaggi (non /start, non /hat) → solo inoltro admin
-    return new Response("OK", { status: 200 });
+    return new Response("OK");
   }
-}
+};
